@@ -93,7 +93,7 @@ class BruteForce(SIA):
             ERROR_PARTITION,
         )
 
-        small_phi = np.infty
+        small_phi = np.inf
         mejor_dist_marg: np.ndarray = DUMMY_ARR
 
         futuros = self.sia_subsistema.indices_ncubos
