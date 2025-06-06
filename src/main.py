@@ -2,6 +2,7 @@ from src.controllers.manager import Manager
 
 from src.strategies.force import BruteForce
 from src.strategies.phi import Phi
+from src.strategies.q_nodes import QNodes
 
 
 def iniciar():
@@ -15,7 +16,7 @@ def iniciar():
     gestor_sistema = Manager(estado_inicial)
 
     ### Ejemplo de solución mediante módulo de fuerza bruta ###
-    analizador_bf = Phi(gestor_sistema)
+    analizador_bf = QNodes(gestor_sistema)
 
     sia_cero = analizador_bf.aplicar_estrategia(
         condiciones,
