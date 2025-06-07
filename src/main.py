@@ -20,7 +20,7 @@ def iniciar():
         gestor_sistema.generar_red(dimensiones=len(estado_inicial), datos_discretos=True)
 
     
-    analizador_qn = QNodes(gestor_sistema)
+    analizador_qn = GeometricSIA(gestor_sistema)
     sia_uno = analizador_qn.aplicar_estrategia(condiciones, alcance, mecanismo)
     print(sia_uno)
     

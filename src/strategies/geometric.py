@@ -9,32 +9,20 @@ from src.funcs.base import seleccionar_metrica
 from src.models.base.application import aplicacion
 
 def marginalizar_subconjunto(full_dist: np.ndarray, indices: List[int]) -> np.ndarray:
-    """
-    full_dist: vector de tamaño 2^n con la dist. conjunta sobre {0,1}^n.
-    indices: lista de posiciones (0…n-1) de las variables que queremos conservar.
-    Devuelve la marginal normalizada de tamaño 2^k.
-    """
     n = int(np.log2(full_dist.size))
     k = len(indices)
-    # caso trivial: el sistema ya es el subsistema
     if k == n:
         v = full_dist.copy()
-        return v / v.sum() if v.sum() > 0 else v
-
-    size_k = 1 << k
-    marg = np.zeros(size_k, dtype=float)
-
-    # para cada configuración m de las n variables
-    for m in range(1 << n):
-        # construimos el índice de la marginal extrayendo bit a bit
+        return v/ v.sum() if v.sum()>0 else v
+    marg = np.zeros(1<<k, dtype=float)
+    for m in range(1<<n):
         idx = 0
         for pos, var in enumerate(indices):
             bit = (m >> var) & 1
             idx |= (bit << pos)
         marg[idx] += full_dist[m]
-
-    total = marg.sum()
-    return marg / total if total > 0 else marg
+    tot = marg.sum()
+    return marg/tot if tot>0 else marg
 
 class GeometricSIA(SIA):
     def __init__(self, gestor: Manager):
@@ -47,80 +35,78 @@ class GeometricSIA(SIA):
         S = self.sia_subsistema
         n = len(S.indices_ncubos)
 
-        # precalcula la distribución completa y sus marginales unitarias
+        # Distribución completa
         dist_full = S.distribucion_marginal()
-        # cache de marginales de cualquier subconjunto para poda rápida
-        marg_cache = {}
+        assert dist_full.sum()>0, "¡Distribución del subsistema es cero!"
 
-        def get_marg(indices: Tuple[int,...]) -> np.ndarray:
-            if indices not in marg_cache:
-                marg_cache[indices] = marginalizar_subconjunto(dist_full, list(indices))
-            return marg_cache[indices]
+        # Cache de marginales
+        marg_cache = {}
+        def get_marg(idx_tuple: Tuple[int,...]) -> np.ndarray:
+            if idx_tuple not in marg_cache:
+                marg_cache[idx_tuple] = marginalizar_subconjunto(dist_full, list(idx_tuple))
+            return marg_cache[idx_tuple]
+
+        # Cota heurística: mínimo coste de transicionar por variable
+        # (usamos percentil 5% de las diferencias absolutas como aprox.)
+        diffs = np.abs(dist_full - np.roll(dist_full,1))
+        heuristic_per_var = np.percentile(diffs, 5)
 
         best_score = float('inf')
         best_part  = None
         best_distP = None
 
-        # función recursiva de búsqueda con poda
-        def _search_part(idx: int,
-                         mech: List[int],
-                         alc:  List[int]):
+        def _search_part(idx: int, mech: List[int], alc: List[int]):
             nonlocal best_score, best_part, best_distP
 
-            # Bound parcial: calcula EMD sólo para la parte completamente asignada
-            # y usa 0 como cota para no asignados
+            # Poda trivial: si mech o alc ya no tienen masa, no sigue
             if mech:
-                mS_mech = get_marg(tuple(mech))
-                # como mP_mech aún no existe, la mejor correspondencia es mS_mech misma (dist=0)
-                bound_mech = 0.0
-            else:
-                bound_mech = 0.0
+                if get_marg(tuple(mech)).sum() == 0:
+                    return
             if alc:
-                mS_alc = get_marg(tuple(alc))
-                bound_alc = 0.0
-            else:
-                bound_alc = 0.0
-            # cota global
-            if bound_mech + bound_alc >= best_score:
-                return  # poda inmediata
+                if get_marg(tuple(alc)).sum() == 0:
+                    return
 
-            # si ya asigné todas las variables
+            # Cota parcial: EMD parcial es 0, más heurística para las variables restantes
+            rem = n - idx
+            bound = rem * heuristic_per_var
+            if bound >= best_score:
+                return
+
+            # Si ya asignamos todas las variables, evaluamos
             if idx == n:
-                # evalúa completamente esta partición
-                mP_mech = marginalizar_subconjunto(S.bipartir(
-                    np.array(mech,dtype=int), np.array(alc,dtype=int)
-                ).distribucion_marginal(), mech)
-                mP_alc  = marginalizar_subconjunto(S.bipartir(
-                    np.array(mech,dtype=int), np.array(alc,dtype=int)
-                ).distribucion_marginal(), alc)
+                # descartamos particiones triviales
+                if not mech or not alc:
+                    return
+                # calcula EMD final
+                part = S.bipartir(np.array(alc,dtype=int), np.array(mech,dtype=int))
+                distP = part.distribucion_marginal()
+                mP_mech = marginalizar_subconjunto(distP, mech)
+                mP_alc  = marginalizar_subconjunto(distP, alc)
                 score = self.dist(mP_mech, get_marg(tuple(mech))) + \
                         self.dist(mP_alc,  get_marg(tuple(alc)))
                 if score < best_score:
                     best_score = score
                     best_part  = (mech.copy(), alc.copy())
-                    best_distP = S.bipartir(
-                        np.array(mech,dtype=int), np.array(alc,dtype=int)
-                    ).distribucion_marginal()
+                    best_distP = distP
                 return
 
-            # asignar variable idx a mecanismo (0)
+            # Asignar variable idx a mecanismo
             mech.append(idx)
             _search_part(idx+1, mech, alc)
             mech.pop()
 
-            # asignar variable idx a alcance (1)
+            # Asignar variable idx a alcance
             alc.append(idx)
             _search_part(idx+1, mech, alc)
             alc.pop()
 
-        # iniciar búsqueda
+        # Inicio de la búsqueda
         _search_part(0, [], [])
 
         if best_part is None:
             raise ValueError("No se encontró bipartición válida.")
 
         mech, alc = best_part
-        # duales
         idx_pres = set(S.dims_ncubos.data)
         idx_futu = set(S.indices_ncubos.data)
         dual_mech = list(idx_pres - set(mech))
@@ -128,7 +114,7 @@ class GeometricSIA(SIA):
         fmt = fmt_biparticion([mech, alc], [dual_mech, dual_alc])
 
         return Solution(
-            estrategia="GeometricSIA-BnB",
+            estrategia="GeometricSIA-BnB+Poda",
             perdida=best_score,
             distribucion_subsistema=dist_full,
             distribucion_particion=best_distP,
