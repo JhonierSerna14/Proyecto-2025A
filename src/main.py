@@ -1,28 +1,26 @@
 from src.controllers.manager import Manager
 
-from src.strategies.force import BruteForce
-from src.strategies.phi import Phi
 from src.strategies.geometric import GeometricSIA
+from src.strategies.q_nodes import QNodes
 
 
 def iniciar():
     """Punto de entrada principal"""
-                    # ABCD #
+                    # 23 bits
     estado_inicial = "100000000000000"
-    condiciones =    "111000000000000"
-    alcance =        "111000000000000"
-    mecanismo =      "111100000000000"
+    condiciones =    "111111111111111"
+    alcance =        "111111111111110"
+    mecanismo =      "111111111111111"
 
     gestor_sistema = Manager(estado_inicial)
 
-    ### Ejemplo de solución mediante módulo de fuerza bruta ###
-    # analizador_bf = GeometricSIA(gestor_sistema)
-    analizador_bf = Phi(gestor_sistema)
+    # ✅ Verifica que existe TPM de 23 nodos, o créala si no
+    if not gestor_sistema.tpm_filename.exists():
+        print(f"Archivo TPM de 20 nodos no encontrado. Generando uno nuevo...")
+        gestor_sistema.generar_red(dimensiones=len(estado_inicial), datos_discretos=True)
 
-    sia_cero = analizador_bf.aplicar_estrategia(
-        condiciones,
-        alcance,
-        mecanismo,
-    )
-
-    print(sia_cero)
+    
+    analizador_qn = QNodes(gestor_sistema)
+    sia_uno = analizador_qn.aplicar_estrategia(condiciones, alcance, mecanismo)
+    print(sia_uno)
+    

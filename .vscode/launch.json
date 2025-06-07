@@ -12,12 +12,5 @@
             "console": "integratedTerminal",
             "justMyCode": true
         },
-        {
-            "name": "Python: Archivo actual",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal"
-        }
     ]
 }
