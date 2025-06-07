@@ -1,5 +1,6 @@
 import numpy as np
 import time
+from heapq import nsmallest, heappush
 from typing import List, Tuple
 from src.models.base.sia import SIA
 from src.controllers.manager import Manager
@@ -13,16 +14,16 @@ def marginalizar_subconjunto(full_dist: np.ndarray, indices: List[int]) -> np.nd
     k = len(indices)
     if k == n:
         v = full_dist.copy()
-        return v/ v.sum() if v.sum()>0 else v
-    marg = np.zeros(1<<k, dtype=float)
-    for m in range(1<<n):
+        return v / v.sum() if v.sum() > 0 else v
+    marg = np.zeros(1 << k, dtype=float)
+    for m in range(1 << n):
         idx = 0
         for pos, var in enumerate(indices):
             bit = (m >> var) & 1
             idx |= (bit << pos)
         marg[idx] += full_dist[m]
-    tot = marg.sum()
-    return marg/tot if tot>0 else marg
+    total = marg.sum()
+    return marg / total if total > 0 else marg
 
 class GeometricSIA(SIA):
     def __init__(self, gestor: Manager):
@@ -31,93 +32,111 @@ class GeometricSIA(SIA):
 
     def aplicar_estrategia(self, condicion: str, alcance: str, mecanismo: str) -> Solution:
         t0 = time.time()
+        # 1) Prepara subsistema
         self.sia_preparar_subsistema(condicion, alcance, mecanismo)
         S = self.sia_subsistema
         n = len(S.indices_ncubos)
 
-        # Distribución completa
+        # 2) Distribución completa
         dist_full = S.distribucion_marginal()
-        assert dist_full.sum()>0, "¡Distribución del subsistema es cero!"
+        assert dist_full.sum() > 0, "¡Distribución del subsistema es cero!"
 
-        # Cache de marginales
+        # 3) Cache de marginales
         marg_cache = {}
-        def get_marg(idx_tuple: Tuple[int,...]) -> np.ndarray:
+        def get_marg(idx_tuple: Tuple[int, ...]) -> np.ndarray:
             if idx_tuple not in marg_cache:
                 marg_cache[idx_tuple] = marginalizar_subconjunto(dist_full, list(idx_tuple))
             return marg_cache[idx_tuple]
 
-        # Cota heurística: mínimo coste de transicionar por variable
-        # (usamos percentil 5% de las diferencias absolutas como aprox.)
-        diffs = np.abs(dist_full - np.roll(dist_full,1))
-        heuristic_per_var = np.percentile(diffs, 5)
+        # 4) Heurística por variable restante
+        diffs = np.abs(dist_full - np.roll(dist_full, 1))
+        heuristic_per_var = np.percentile(diffs[diffs > 0], 5) if np.any(diffs > 0) else 0.0
 
-        best_score = float('inf')
-        best_part  = None
-        best_distP = None
+        # 5) Greedy init (no trivial) y partición de respaldo
+        def greedy_init() -> Tuple[float, Tuple[int,...], Tuple[int,...], np.ndarray]:
+            mech, alc = [], []
+            for i in range(n):
+                m_i = marginalizar_subconjunto(dist_full, [i])
+                p1 = m_i[-1] if m_i.size > 1 else m_i[0]
+                if p1 > 0.5:
+                    mech.append(i)
+                else:
+                    alc.append(i)
+            # fuerza no trivial
+            if not mech:
+                mech.append(alc.pop())
+            elif not alc:
+                alc.append(mech.pop())
+            # evalúa phi y distP
+            part = S.bipartir(np.array(alc, dtype=int), np.array(mech, dtype=int))
+            distP = part.distribucion_marginal()
+            mP_mech = marginalizar_subconjunto(distP, mech)
+            mP_alc  = marginalizar_subconjunto(distP, alc)
+            phi = self.dist(mP_mech, get_marg(tuple(mech))) + \
+                  self.dist(mP_alc,  get_marg(tuple(alc)))
+            return phi, tuple(mech), tuple(alc), distP
 
-        def _search_part(idx: int, mech: List[int], alc: List[int]):
-            nonlocal best_score, best_part, best_distP
+        best_score, best_mech, best_alc, best_distP = greedy_init()
 
-            # Poda trivial: si mech o alc ya no tienen masa, no sigue
-            if mech:
-                if get_marg(tuple(mech)).sum() == 0:
-                    return
-            if alc:
-                if get_marg(tuple(alc)).sum() == 0:
-                    return
+        # 6) Variable ordering por varianza de marginal univariable
+        impacts = []
+        for i in range(n):
+            marg_i = marginalizar_subconjunto(dist_full, [i])
+            impacts.append((i, float(np.var(marg_i))))
+        order = [i for i,_ in sorted(impacts, key=lambda x: -x[1])]
 
-            # Cota parcial: EMD parcial es 0, más heurística para las variables restantes
-            rem = n - idx
-            bound = rem * heuristic_per_var
-            if bound >= best_score:
-                return
+        # 7) Beam Search + Branch & Bound
+        B = 200
+        beam: List[Tuple[float,int,Tuple[int,...],Tuple[int,...]]] = [(0.0, 0, (), ())]
 
-            # Si ya asignamos todas las variables, evaluamos
-            if idx == n:
-                # descartamos particiones triviales
-                if not mech or not alc:
-                    return
-                # calcula EMD final
-                part = S.bipartir(np.array(alc,dtype=int), np.array(mech,dtype=int))
-                distP = part.distribucion_marginal()
-                mP_mech = marginalizar_subconjunto(distP, mech)
-                mP_alc  = marginalizar_subconjunto(distP, alc)
-                score = self.dist(mP_mech, get_marg(tuple(mech))) + \
-                        self.dist(mP_alc,  get_marg(tuple(alc)))
-                if score < best_score:
-                    best_score = score
-                    best_part  = (mech.copy(), alc.copy())
-                    best_distP = distP
-                return
+        while True:
+            if all(pos == n for _, pos, _, _ in beam):
+                break
+            next_beam = []
+            for bound, pos, mech_tup, alc_tup in beam:
+                if pos < n:
+                    # poda trivial
+                    if mech_tup and get_marg(mech_tup).sum() == 0: continue
+                    if alc_tup and get_marg(alc_tup).sum() == 0:   continue
+                    # cota parcial
+                    rem = n - pos
+                    bp = rem * heuristic_per_var
+                    if bp >= best_score: continue
+                    var = order[pos]
+                    heappush(next_beam, (bp, pos+1, mech_tup + (var,), alc_tup))
+                    heappush(next_beam, (bp, pos+1, mech_tup, alc_tup + (var,)))
+                else:
+                    heappush(next_beam, (bound, pos, mech_tup, alc_tup))
+            beam = nsmallest(B, next_beam, key=lambda x: x[0])
 
-            # Asignar variable idx a mecanismo
-            mech.append(idx)
-            _search_part(idx+1, mech, alc)
-            mech.pop()
+        # 8) Evaluar estados finales
+        for _, pos, mech_tup, alc_tup in beam:
+            if not mech_tup or not alc_tup: 
+                continue
+            part = S.bipartir(np.array(list(alc_tup), dtype=int),
+                              np.array(list(mech_tup), dtype=int))
+            distP = part.distribucion_marginal()
+            mP_mech = marginalizar_subconjunto(distP, list(mech_tup))
+            mP_alc  = marginalizar_subconjunto(distP, list(alc_tup))
+            phi = self.dist(mP_mech, get_marg(mech_tup)) + \
+                  self.dist(mP_alc,  get_marg(alc_tup))
+            if phi < best_score:
+                best_score, best_mech, best_alc, best_distP = (
+                    phi, mech_tup, alc_tup, distP
+                )
 
-            # Asignar variable idx a alcance
-            alc.append(idx)
-            _search_part(idx+1, mech, alc)
-            alc.pop()
-
-        # Inicio de la búsqueda
-        _search_part(0, [], [])
-
-        if best_part is None:
-            raise ValueError("No se encontró bipartición válida.")
-
-        mech, alc = best_part
+        # 9) Formatear partición y devolver
         idx_pres = set(S.dims_ncubos.data)
         idx_futu = set(S.indices_ncubos.data)
-        dual_mech = list(idx_pres - set(mech))
-        dual_alc  = list(idx_futu - set(alc))
-        fmt = fmt_biparticion([mech, alc], [dual_mech, dual_alc])
+        dual_mech = list(idx_pres - set(best_mech))
+        dual_alc  = list(idx_futu - set(best_alc))
+        fmt = fmt_biparticion([list(best_mech), list(best_alc)], [dual_mech, dual_alc])
 
         return Solution(
-            estrategia="GeometricSIA-BnB+Poda",
+            estrategia="GeometricSIA",
             perdida=best_score,
             distribucion_subsistema=dist_full,
             distribucion_particion=best_distP,
-            tiempo_total=time.time()-t0,
+            tiempo_total=time.time() - t0,
             particion=fmt
         )
