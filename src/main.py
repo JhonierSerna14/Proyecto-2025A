@@ -7,10 +7,10 @@ from src.strategies.q_nodes import QNodes
 def iniciar():
     """Punto de entrada principal"""
                     # 23 bits
-    estado_inicial = "10000000000000000000000"
-    condiciones =    "11111111111111111111111"
-    alcance =        "11111111111111111111111"
-    mecanismo =      "11111111111111111111111"
+    estado_inicial = "1000000000000000000000000"
+    condiciones =    "1111111111111111111111111"
+    alcance =        "1111111111111111111111111"
+    mecanismo =      "1111111111111111111111111"
 
     gestor_sistema = Manager(estado_inicial)
 
