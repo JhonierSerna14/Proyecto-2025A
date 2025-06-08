@@ -48,13 +48,34 @@ class SIA(ABC):
 
     def sia_cargar_tpm(self) -> np.ndarray:
         """
-        Carga TPM desde el archivo indicado por el gestor.
+        Carga TPM desde el archivo indicado por el gestor de manera eficiente en memoria.
+        Utiliza carga en chunks para manejar archivos grandes.
         """
-        dataset = np.genfromtxt(
-            self.sia_gestor.tpm_filename,
-            delimiter=COLON_DELIM,
-        )
-        return dataset
+        try:
+            # Primero intentamos cargar normalmente
+            dataset = np.genfromtxt(
+                self.sia_gestor.tpm_filename,
+                delimiter=COLON_DELIM,
+            )
+            return dataset
+        except MemoryError:
+            # Si falla, intentamos cargar en chunks
+            chunk_size = 1000  # Ajustar según la memoria disponible
+            chunks = []
+            
+            with open(self.sia_gestor.tpm_filename, 'r') as f:
+                while True:
+                    chunk = []
+                    for _ in range(chunk_size):
+                        line = f.readline()
+                        if not line:
+                            break
+                        chunk.append([float(x) for x in line.strip().split(COLON_DELIM)])
+                    if not chunk:
+                        break
+                    chunks.append(np.array(chunk))
+            
+            return np.vstack(chunks)
 
     def sia_preparar_subsistema(
         self,
