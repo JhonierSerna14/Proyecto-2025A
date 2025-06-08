@@ -52,15 +52,16 @@ class SIA(ABC):
         Utiliza carga en chunks para manejar archivos grandes.
         """
         try:
-            # Primero intentamos cargar normalmente
+            # Primero intentamos cargar normalmente con dtype float32 para usar menos memoria
             dataset = np.genfromtxt(
                 self.sia_gestor.tpm_filename,
                 delimiter=COLON_DELIM,
+                dtype=np.float32
             )
             return dataset
         except MemoryError:
-            # Si falla, intentamos cargar en chunks
-            chunk_size = 1000  # Ajustar según la memoria disponible
+            # Si falla, intentamos cargar en chunks más pequeños
+            chunk_size = 100  # Reducimos el tamaño del chunk
             chunks = []
             
             with open(self.sia_gestor.tpm_filename, 'r') as f:
@@ -73,9 +74,17 @@ class SIA(ABC):
                         chunk.append([float(x) for x in line.strip().split(COLON_DELIM)])
                     if not chunk:
                         break
-                    chunks.append(np.array(chunk))
+                    # Convertimos cada chunk a float32 inmediatamente
+                    chunks.append(np.array(chunk, dtype=np.float32))
             
-            return np.vstack(chunks)
+            # Procesamos los chunks en grupos más pequeños para evitar problemas de memoria
+            final_chunks = []
+            for i in range(0, len(chunks), 10):
+                group = chunks[i:i+10]
+                if group:
+                    final_chunks.append(np.vstack(group))
+            
+            return np.vstack(final_chunks)
 
     def sia_preparar_subsistema(
         self,

@@ -11,9 +11,6 @@ Características principales:
 - Optimización de memoria mediante caché
 - Múltiples inicializaciones greedy
 - Métricas de calidad combinadas
-
-Autor: [Autor del proyecto]
-Fecha: [Fecha de implementación]
 """
 
 import numpy as np

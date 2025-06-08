@@ -24,3 +24,4 @@ def iniciar():
     sia_uno = analizador_qn.aplicar_estrategia(condiciones, alcance, mecanismo)
     print(sia_uno)
     
+    
