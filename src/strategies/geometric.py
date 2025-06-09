@@ -4,6 +4,7 @@ from typing import List, Tuple
 from src.models.base.sia import SIA
 from src.controllers.manager import Manager
 from src.funcs.format import fmt_biparticion
+from src.middlewares.profile import profile, profiler_manager
 from src.models.core.solution import Solution
 from src.funcs.base import seleccionar_metrica
 from src.models.base.application import aplicacion
@@ -27,8 +28,12 @@ def marginalizar_subconjunto(full_dist: np.ndarray, indices: List[int]) -> np.nd
 class GeometricSIA(SIA):
     def __init__(self, gestor: Manager):
         super().__init__(gestor)
+        profiler_manager.start_session(
+            f"GN{len(gestor.estado_inicial)}{gestor.pagina}"
+        )
         self.dist = seleccionar_metrica(aplicacion.distancia_metrica)
 
+    @profile(name="Geometric")
     def aplicar_estrategia(self, condicion: str, alcance: str, mecanismo: str) -> Solution:
         t0 = time.time()
         self.sia_preparar_subsistema(condicion, alcance, mecanismo)

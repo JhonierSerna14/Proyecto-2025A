@@ -1,6 +1,7 @@
 from src.controllers.manager import Manager
 
 from src.strategies.geometric import GeometricSIA
+from src.strategies.geometric_parallel import GeometricParallelSIA
 from src.strategies.q_nodes import QNodes
 
 
@@ -9,7 +10,7 @@ def iniciar():
                     # 23 bits
     estado_inicial = "100000000000000"
     condiciones =    "111111111111111"
-    alcance =        "111111111111110"
+    alcance =        "111111111111111"
     mecanismo =      "111111111111111"
 
     gestor_sistema = Manager(estado_inicial)
@@ -20,7 +21,7 @@ def iniciar():
         gestor_sistema.generar_red(dimensiones=len(estado_inicial), datos_discretos=True)
 
     
-    analizador_qn = GeometricSIA(gestor_sistema)
+    analizador_qn = GeometricParallelSIA(gestor_sistema)
     sia_uno = analizador_qn.aplicar_estrategia(condiciones, alcance, mecanismo)
     print(sia_uno)
     
